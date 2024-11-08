@@ -40,7 +40,7 @@ def validate_investment_amount(amount):
     except ValueError:
         return False, "请输入有效的数字"
 
-def render_api_setup():
+def render_api_setup(session_id):
     st.header("⚙️ API设置")
 
     # 添加API设置说明
@@ -66,7 +66,7 @@ def render_api_setup():
     config = None
 
     try:
-        config = db.get_latest_config()
+        config = db.get_latest_config(session_id)
     except Exception as e:
         st.warning("""
         ### ⚠️ 无法连接数据库
@@ -86,7 +86,7 @@ def render_api_setup():
     with col2:
         if st.button("🔄 重置设置", use_container_width=True, help="清除所有现有配置和历史数据，重新开始设置"):
             try:
-                db.clear_config()
+                db.clear_config(session_id)
                 st.success("""
                 ### ✅ 重置成功！
                 
@@ -172,7 +172,7 @@ def render_api_setup():
 
                 # 保存设置
                 try:
-                    db.save_config(api_key, api_secret, total_investment)
+                    db.save_config(api_key, api_secret, total_investment, session_id)
                     status.update(label="✅ 设置保存成功！", state="complete")
                     st.success("""
                     ### ✅ 配置更新成功！

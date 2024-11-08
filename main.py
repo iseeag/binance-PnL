@@ -1,4 +1,5 @@
 import streamlit as st
+import uuid
 from database.db import Database
 from services.binance_service import BinanceService
 from components.api_setup import render_api_setup
@@ -11,14 +12,28 @@ st.set_page_config(
     layout="wide"
 )
 
+def initialize_session():
+    """Initialize or get existing session ID"""
+    if 'session_id' not in st.session_state:
+        st.session_state.session_id = str(uuid.uuid4())
+    return st.session_state.session_id
+
 def main():
     st.title("币安钱包追踪器 🚀")
     
-    db = Database()
-    config = None
-    
+    # Initialize database connection
     try:
-        config = db.get_latest_config()
+        db = Database()
+    except Exception as e:
+        st.error("数据库连接失败")
+        return
+        
+    # Initialize session
+    session_id = initialize_session()
+    
+    config = None
+    try:
+        config = db.get_latest_config(session_id)
     except Exception as e:
         st.error(f"无法连接数据库：{str(e)}")
     
@@ -26,7 +41,7 @@ def main():
     tab1, tab2 = st.tabs(["📊 资产概览", "⚙️ 设置"])
     
     with tab2:
-        render_api_setup()
+        render_api_setup(session_id)
     
     with tab1:
         if not config:
@@ -54,10 +69,10 @@ def main():
                 
                 # Save current balance to history
                 try:
-                    db.save_balance_history(spot_value, futures_value)
+                    db.save_balance_history(spot_value, futures_value, session_id)
                     
                     # Get balance history and display charts
-                    balance_history = db.get_balance_history()
+                    balance_history = db.get_balance_history(session_id)
                     render_profit_charts(spot_value, futures_value, config, balance_history)
                 except Exception as e:
                     st.error(f"保存或获取历史数据失败：{str(e)}")
