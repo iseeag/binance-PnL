@@ -1,0 +1,7 @@
+.cache/
+.local/
+.upm/
+__pycache__
+.DS_Store
+.idea
+
