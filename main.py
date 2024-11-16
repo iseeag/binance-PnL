@@ -5,6 +5,7 @@ from services.binance_service import BinanceService
 from components.api_setup import render_api_setup
 from components.wallet_display import render_wallet_display
 from components.charts import render_profit_charts
+from utils.calculations import to_float
 
 st.set_page_config(
     page_title="币安钱包追踪器",
@@ -62,18 +63,24 @@ def main():
             try:
                 spot_balances = binance_service.get_spot_balance()
                 futures_balances = binance_service.get_futures_balance()
+                coin_futures_balances = binance_service.get_coin_futures_balance()
                 prices = binance_service.get_current_prices([])
                 
-                spot_value = binance_service.calculate_total_value(spot_balances, prices)
-                futures_value = float(futures_balances[futures_balances['asset'] == 'USDT']['balance'].iloc[0])
+                spot_value = to_float(binance_service.calculate_total_value(spot_balances, prices))
+                
+                # Safe USDT balance extraction for futures
+                futures_usdt = futures_balances[futures_balances['asset'] == 'USDT']
+                futures_value = to_float(futures_usdt['balance'].values[0]) if not futures_usdt.empty else 0.0
+                
+                coin_futures_value = to_float(binance_service.calculate_coin_futures_value(coin_futures_balances, prices))
                 
                 # Save current balance to history
                 try:
-                    db.save_balance_history(spot_value, futures_value, session_id)
+                    db.save_balance_history(spot_value, futures_value, coin_futures_value, session_id)
                     
                     # Get balance history and display charts
                     balance_history = db.get_balance_history(session_id)
-                    render_profit_charts(spot_value, futures_value, config, balance_history)
+                    render_profit_charts(spot_value, futures_value + coin_futures_value, config, balance_history)
                 except Exception as e:
                     st.error(f"保存或获取历史数据失败：{str(e)}")
                     

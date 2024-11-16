@@ -2,6 +2,7 @@ import os
 import psycopg2
 from psycopg2.extras import DictCursor
 from datetime import datetime, timedelta
+from utils.calculations import to_float
 
 class Database:
     def __init__(self):
@@ -34,6 +35,7 @@ class Database:
                     id SERIAL PRIMARY KEY,
                     spot_value DECIMAL NOT NULL,
                     futures_value DECIMAL NOT NULL,
+                    coin_futures_value DECIMAL NOT NULL DEFAULT 0,
                     total_value DECIMAL NOT NULL,
                     session_id VARCHAR(255),
                     recorded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
@@ -81,17 +83,25 @@ class Database:
             self.conn.rollback()
             raise Exception(f"清除配置失败: {str(e)}")
 
-    def save_balance_history(self, spot_value, futures_value, session_id):
+    def save_balance_history(self, spot_value, futures_value, coin_futures_value, session_id):
         try:
+            # Ensure all values are properly converted to float
+            spot_value = to_float(spot_value)
+            futures_value = to_float(futures_value)
+            coin_futures_value = to_float(coin_futures_value)
+            total_value = spot_value + futures_value + coin_futures_value
+            
             with self.conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO balance_history (spot_value, futures_value, total_value, session_id, recorded_at)
-                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                """, (spot_value, futures_value, spot_value + futures_value, session_id))
+                    INSERT INTO balance_history 
+                    (spot_value, futures_value, coin_futures_value, total_value, session_id, recorded_at)
+                    VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                """, (spot_value, futures_value, coin_futures_value, total_value, session_id))
             self.conn.commit()
         except Exception as e:
             print(f"Error saving balance history: {str(e)}")
             self.conn.rollback()
+            raise
 
     def get_balance_history(self, session_id, hours=None):
         try:
@@ -100,14 +110,11 @@ class Database:
                     SELECT 
                         COALESCE(spot_value, 0) as spot_value,
                         COALESCE(futures_value, 0) as futures_value,
+                        COALESCE(coin_futures_value, 0) as coin_futures_value,
                         COALESCE(total_value, 0) as total_value,
                         recorded_at AT TIME ZONE 'UTC' as recorded_at
                     FROM balance_history 
-                    WHERE spot_value IS NOT NULL 
-                        AND futures_value IS NOT NULL 
-                        AND total_value IS NOT NULL 
-                        AND recorded_at IS NOT NULL
-                        AND session_id = %s
+                    WHERE session_id = %s
                 """
                 
                 if hours:
@@ -124,6 +131,11 @@ class Database:
                 for row in result:
                     row_dict = dict(row)
                     if row_dict['recorded_at'] and isinstance(row_dict['recorded_at'], datetime):
+                        # Convert decimal values to float
+                        row_dict['spot_value'] = to_float(row_dict['spot_value'])
+                        row_dict['futures_value'] = to_float(row_dict['futures_value'])
+                        row_dict['coin_futures_value'] = to_float(row_dict['coin_futures_value'])
+                        row_dict['total_value'] = to_float(row_dict['total_value'])
                         formatted_result.append(row_dict)
                     else:
                         print(f"Invalid timestamp format: {row_dict['recorded_at']}")

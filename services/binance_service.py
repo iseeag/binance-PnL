@@ -18,13 +18,17 @@ class BinanceService:
         futures_account = self.client.futures_account_balance()
         return pd.DataFrame(futures_account)
 
+    def get_coin_futures_balance(self):
+        coin_futures_account = self.client.futures_coin_account_balance()
+        return pd.DataFrame(coin_futures_account)
+
     def get_current_prices(self, symbols):
         prices = self.client.get_symbol_ticker()
         return {item['symbol']: float(item['price']) for item in prices}
 
-    def calculate_total_value(self, balances, prices):
+    def calculate_total_value(self, spot_balances, prices):
         total_usdt = 0
-        for _, balance in balances.iterrows():
+        for _, balance in spot_balances.iterrows():
             symbol = balance['asset']
             if symbol == 'USDT':
                 total_usdt += float(balance['total'])
@@ -32,4 +36,16 @@ class BinanceService:
                 symbol_pair = f"{symbol}USDT"
                 if symbol_pair in prices:
                     total_usdt += float(balance['total']) * prices[symbol_pair]
+        return total_usdt
+
+    def calculate_coin_futures_value(self, coin_futures_balances, prices):
+        total_usdt = 0
+        for _, balance in coin_futures_balances.iterrows():
+            symbol = balance['asset']
+            if symbol == 'USDT':
+                total_usdt += float(balance['balance'])
+            else:
+                symbol_pair = f"{symbol}USDT"
+                if symbol_pair in prices:
+                    total_usdt += float(balance['balance']) * prices[symbol_pair]
         return total_usdt

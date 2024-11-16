@@ -88,6 +88,7 @@ def render_wallet_display(binance_service, config):
             with st.spinner("获取余额信息..."):
                 spot_balances = binance_service.get_spot_balance()
                 futures_balances = binance_service.get_futures_balance()
+                coin_futures_balances = binance_service.get_coin_futures_balance()
             
             with st.spinner("获取价格数据..."):
                 prices = binance_service.get_current_prices([])
@@ -95,12 +96,13 @@ def render_wallet_display(binance_service, config):
             # 计算总值
             spot_value = binance_service.calculate_total_value(spot_balances, prices)
             futures_value = float(futures_balances[futures_balances['asset'] == 'USDT']['balance'].iloc[0])
-            total_value = to_float(spot_value) + to_float(futures_value)
+            coin_futures_value = binance_service.calculate_coin_futures_value(coin_futures_balances, prices)
+            total_value = to_float(spot_value) + to_float(futures_value) + to_float(coin_futures_value)
             
             status.update(label="✅ 数据获取成功", state="complete")
             
             # 显示数据
-            col1, col2 = st.columns(2)
+            col1, col2, col3, col4 = st.columns(4)
             
             with col1:
                 st.metric(
@@ -110,9 +112,23 @@ def render_wallet_display(binance_service, config):
                 )
                 
             with col2:
+                st.metric(
+                    "现货资产",
+                    format_currency(spot_value),
+                    ""
+                )
+                
+            with col3:
+                st.metric(
+                    "合约资产",
+                    format_currency(futures_value + coin_futures_value),
+                    f"U本位: {format_currency(futures_value)} / 币本位: {format_currency(coin_futures_value)}"
+                )
+                
+            with col4:
                 profit_rate = calculate_profit_rate(total_value, config['total_investment'])
                 st.metric(
-                    "当前总资产",
+                    "总资产",
                     format_currency(total_value),
                     format_percentage(profit_rate)
                 )
