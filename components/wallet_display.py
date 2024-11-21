@@ -46,7 +46,7 @@ def check_api_permissions(binance_service):
         # 显示操作按钮
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("⚙️ 前往设置", use_container_width=True, key="goto_settings"):
+            if st.button("⚙️ 前往设置", use_container_width=True, key="goto_settings_error"):
                 st.session_state.current_tab = "⚙️ 设置"
                 st.rerun()
         with col2:
@@ -72,77 +72,119 @@ def check_api_permissions(binance_service):
         return False
 
 def render_wallet_display(binance_service, config):
-    st.header("💰 钱包概览")
+    """Display wallet information for multiple APIs"""
+    api_name = config.get('api_name', 'default')
     
     # API状态指示器
-    with st.status("正在连接币安API...", expanded=True) as status:
+    with st.status(f"正在连接币安API ({api_name})...", expanded=True) as status:
         # 首先检查API权限
-        if not check_api_permissions(binance_service):
-            status.error("API验证失败")
+        try:
+            if not check_api_permissions(binance_service):
+                status.error(f"API '{api_name}' 验证失败")
+                # Don't return, show retry options
+                st.error(f"""
+                ### ❌ API '{api_name}' 验证失败
+                
+                此API可能无法正常工作。您可以：
+                1. 检查API设置
+                2. 重新验证连接
+                3. 暂时忽略此API继续使用其他API
+                """)
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if st.button("⚙️ 检查设置", key=f"check_settings_{api_name}", use_container_width=True):
+                        st.session_state.current_tab = "⚙️ 设置"
+                        st.rerun()
+                with col2:
+                    if st.button("🔄 重新验证", key=f"revalidate_{api_name}", use_container_width=True):
+                        st.rerun()
+                with col3:
+                    if st.button("⏭️ 继续", key=f"continue_{api_name}", use_container_width=True):
+                        return
+                return
+        except Exception as e:
+            status.error(f"API '{api_name}' 验证过程出错")
+            st.error(f"验证过程发生错误: {str(e)}")
             return
         
         status.update(label="正在获取钱包数据...", state="running")
         
         try:
-            # 获取余额信息
-            with st.spinner("获取余额信息..."):
-                spot_balances = binance_service.get_spot_balance()
-                futures_balances = binance_service.get_futures_balance()
-                coin_futures_balances = binance_service.get_coin_futures_balance()
-            
-            with st.spinner("获取价格数据..."):
-                prices = binance_service.get_current_prices([])
+            # 获取所有钱包价值
+            with st.spinner("获取钱包数据..."):
+                wallet_values = binance_service.get_all_wallet_values()
             
             # 计算总值
-            spot_value = binance_service.calculate_total_value(spot_balances, prices)
-            futures_value = float(futures_balances[futures_balances['asset'] == 'USDT']['balance'].iloc[0])
-            coin_futures_value = binance_service.calculate_coin_futures_value(coin_futures_balances, prices)
-            total_value = to_float(spot_value) + to_float(futures_value) + to_float(coin_futures_value)
+            spot_value = to_float(wallet_values.get('spot', 0))
+            futures_value = to_float(wallet_values.get('futures', 0))
+            coin_futures_value = to_float(wallet_values.get('coin_futures', 0))
+            cross_margin_value = to_float(wallet_values.get('cross_margin', 0))
+            isolated_margin_value = to_float(wallet_values.get('isolated_margin', 0))
+            total_value = sum([spot_value, futures_value, coin_futures_value, 
+                             cross_margin_value, isolated_margin_value])
             
             status.update(label="✅ 数据获取成功", state="complete")
             
+            # 计算收益
+            initial_investment = to_float(config['total_investment'])
+            profit_amount = total_value - initial_investment
+            profit_rate = calculate_profit_rate(total_value, initial_investment)
+
             # 显示数据
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
                 st.metric(
                     "初始投资",
-                    format_currency(config['total_investment']),
-                    ""
+                    format_currency(initial_investment)
                 )
-                
             with col2:
                 st.metric(
-                    "现货资产",
-                    format_currency(spot_value),
-                    ""
+                    "当前总资产",
+                    format_currency(total_value)
                 )
-                
             with col3:
                 st.metric(
-                    "合约资产",
-                    format_currency(futures_value + coin_futures_value),
-                    f"U本位: {format_currency(futures_value)} / 币本位: {format_currency(coin_futures_value)}"
+                    "收益",
+                    format_currency(profit_amount)
                 )
-                
             with col4:
-                profit_rate = calculate_profit_rate(total_value, config['total_investment'])
                 st.metric(
-                    "总资产",
-                    format_currency(total_value),
+                    "收益率",
                     format_percentage(profit_rate)
                 )
             
-            # 添加刷新按钮
-            st.button("🔄 刷新数据", key="refresh_wallet", on_click=st.rerun)
+            # 添加分割线增强视觉层次
+            st.divider()
+            
+            # 显示资产分布
+            dist_col1, dist_col2, dist_col3, dist_col4, dist_col5 = st.columns(5)
+            
+            with dist_col1:
+                st.metric("现货", format_currency(spot_value))
+            
+            with dist_col2:
+                st.metric("U本位合约", format_currency(futures_value))
+            
+            with dist_col3:
+                st.metric("币本位合约", format_currency(coin_futures_value))
+            
+            with dist_col4:
+                st.metric("全仓杠杆", format_currency(cross_margin_value))
+            
+            with dist_col5:
+                st.metric("逐仓杠杆", format_currency(isolated_margin_value))
+            
+            # 刷新按钮已移除
                 
         except BinanceAPIException as e:
             status.error("获取数据失败")
             error_messages = {
-                -2015: "API密钥无效或权限不足",
-                -1021: "请求超时，请稍后重试",
-                -1022: "签名无效，请检查API设置",
-                -1102: "参数错误，请联系技术支持"
+                -2015: f"API '{config.get('api_name', 'default')}' 密钥无效或权限不足",
+                -1021: f"API '{config.get('api_name', 'default')}' 请求超时，请稍后重试",
+                -1022: f"API '{config.get('api_name', 'default')}' 签名无效，请检查设置",
+                -1102: f"API '{config.get('api_name', 'default')}' 参数错误，请联系技术支持"
             }
             
             error_msg = error_messages.get(e.code, f"币安API错误 (代码: {e.code})")

@@ -5,7 +5,7 @@ from utils.calculations import to_float, calculate_profit_rate
 from datetime import datetime
 import pytz
 
-def render_profit_charts(spot_value, futures_value, config, balance_history):
+def render_profit_charts(total_value, config, balance_history):
     st.header("📈 收益趋势分析")
     
     try:
@@ -15,11 +15,22 @@ def render_profit_charts(spot_value, futures_value, config, balance_history):
             return
 
         # Validate data structure
-        required_columns = ['spot_value', 'futures_value', 'total_value', 'recorded_at']
-        if not all(isinstance(entry, dict) and all(key in entry for key in required_columns) 
-                  for entry in balance_history):
-            st.error("数据格式错误：缺少必要的数据列")
+        required_columns = [
+            'spot_value', 'futures_value', 'coin_futures_value',
+            'cross_margin_value', 'isolated_margin_value',
+            'total_value', 'recorded_at'
+        ]
+        if not all(isinstance(entry, dict) for entry in balance_history):
+            st.error("数据格式错误：历史数据格式不正确")
             return
+        
+        missing_columns = [col for col in required_columns if not all(col in entry for entry in balance_history)]
+        if missing_columns:
+            print(f"Missing columns in balance history: {missing_columns}")
+            # Initialize missing columns with 0
+            for entry in balance_history:
+                for col in missing_columns:
+                    entry[col] = 0.0
 
         # Convert to DataFrame with proper timestamp handling
         df = pd.DataFrame(balance_history)
@@ -33,11 +44,16 @@ def render_profit_charts(spot_value, futures_value, config, balance_history):
                 return
         
         # Convert numeric columns with validation
-        for col in ['spot_value', 'futures_value', 'total_value']:
+        numeric_columns = [
+            'spot_value', 'futures_value', 'coin_futures_value',
+            'cross_margin_value', 'isolated_margin_value', 'total_value'
+        ]
+        for col in numeric_columns:
             try:
                 df[col] = df[col].apply(lambda x: to_float(x) if x is not None else 0.0)
             except Exception as e:
                 st.error(f"数值转换错误 ({col}): {str(e)}")
+                print(f"Error converting {col}: {str(e)}")
                 return
 
         # 获取并验证total_investment
@@ -104,9 +120,8 @@ def render_profit_charts(spot_value, futures_value, config, balance_history):
         
         # Display current profit rate with validation
         try:
-            if spot_value is not None and futures_value is not None:
-                current_total = to_float(spot_value) + to_float(futures_value)
-                current_profit_rate = calculate_profit_rate(current_total, total_investment)
+            if total_value is not None:
+                current_profit_rate = calculate_profit_rate(to_float(total_value), total_investment)
                 st.metric("当前收益率", f"{current_profit_rate:.2f}%")
         except Exception as e:
             st.error(f"当前收益率计算错误: {str(e)}")

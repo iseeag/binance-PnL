@@ -1,4 +1,5 @@
 import streamlit as st
+import psycopg2.extras
 from database.db import Database
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
@@ -42,6 +43,22 @@ def validate_investment_amount(amount):
 
 def render_api_setup(session_id):
     st.header("⚙️ API设置")
+
+    # Get existing API configurations
+    db = Database()
+    existing_configs = []
+    try:
+        # Execute a query to get all configs for this session
+        with db.conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute("""
+                SELECT api_name, api_key, api_secret, total_investment 
+                FROM user_config 
+                WHERE session_id = %s 
+                ORDER BY api_name
+            """, (session_id,))
+            existing_configs = cur.fetchall()
+    except Exception as e:
+        st.error(f"获取API配置失败: {str(e)}")
 
     # 添加API设置说明
     with st.expander("📖 使用说明", expanded=False):
@@ -105,20 +122,45 @@ def render_api_setup(session_id):
                 3. 联系技术支持
                 """)
 
+    # Display existing configurations
+    if existing_configs:
+        st.subheader("现有API配置")
+        for config in existing_configs:
+            with st.expander(f"API: {config['api_name']}", expanded=False):
+                st.text(f"API Key: {'*' * 20}")
+                st.text(f"投资金额: {config['total_investment']} USDT")
+                if st.button("删除", key=f"delete_{config['api_name']}"):
+                    try:
+                        with db.conn.cursor() as cur:
+                            cur.execute("""
+                                DELETE FROM user_config 
+                                WHERE session_id = %s AND api_name = %s
+                            """, (session_id, config['api_name']))
+                        db.conn.commit()
+                        st.success(f"已删除 {config['api_name']} 配置")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"删除失败: {str(e)}")
+
     with st.form("api_setup_form", clear_on_submit=False):
         # API密钥输入
-        st.subheader("API配置", divider="gray")
+        st.subheader("添加新API配置", divider="gray")
+        
+        api_name = st.text_input(
+            "API名称",
+            value="",
+            help="为这个API配置起一个名字，例如：'主账号'、'现货账号'等"
+        )
+        
         api_key = st.text_input(
             "API Key",
             type="password",
-            value=config['api_key'] if config else "",
             help="请输入您的币安API Key，注意保护密钥安全"
         )
         
         api_secret = st.text_input(
             "API Secret",
             type="password",
-            value=config['api_secret'] if config else "",
             help="请输入您的币安API Secret，注意保护密钥安全"
         )
 
@@ -172,10 +214,13 @@ def render_api_setup(session_id):
 
                 # 保存设置
                 try:
-                    db.save_config(api_key, api_secret, total_investment, session_id)
+                    if not api_name:
+                        raise ValueError("API名称不能为空")
+                        
+                    db.save_config(api_key, api_secret, total_investment, session_id, api_name)
                     status.update(label="✅ 设置保存成功！", state="complete")
-                    st.success("""
-                    ### ✅ 配置更新成功！
+                    st.success(f"""
+                    ### ✅ API配置 '{api_name}' 保存成功！
                     
                     系统将在3秒后自动刷新...
                     """)

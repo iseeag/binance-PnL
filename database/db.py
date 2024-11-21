@@ -23,6 +23,7 @@ class Database:
                     id SERIAL PRIMARY KEY,
                     api_key VARCHAR(255),
                     api_secret VARCHAR(255),
+                    api_name VARCHAR(50) DEFAULT 'default',
                     total_investment DECIMAL,
                     session_id VARCHAR(255),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -33,40 +34,63 @@ class Database:
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS balance_history (
                     id SERIAL PRIMARY KEY,
-                    spot_value DECIMAL NOT NULL,
-                    futures_value DECIMAL NOT NULL,
+                    spot_value DECIMAL NOT NULL DEFAULT 0,
+                    futures_value DECIMAL NOT NULL DEFAULT 0,
                     coin_futures_value DECIMAL NOT NULL DEFAULT 0,
+                    cross_margin_value DECIMAL NOT NULL DEFAULT 0,
+                    isolated_margin_value DECIMAL NOT NULL DEFAULT 0,
                     total_value DECIMAL NOT NULL,
+                    wallet_type VARCHAR(20) DEFAULT 'spot',
                     session_id VARCHAR(255),
                     recorded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
                 )
             ''')
+            
+            # Create indexes for better performance
+            cur.execute('''
+                CREATE INDEX IF NOT EXISTS idx_user_config_session_api 
+                ON user_config(session_id, api_name);
+                
+                CREATE INDEX IF NOT EXISTS idx_balance_history_session_type 
+                ON balance_history(session_id, wallet_type);
+            ''')
         self.conn.commit()
 
-    def save_config(self, api_key, api_secret, total_investment, session_id):
-        """Save user configuration with session_id"""
+    def save_config(self, api_key, api_secret, total_investment, session_id, api_name='default'):
+        """Save user configuration with session_id and api_name"""
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO user_config (api_key, api_secret, total_investment, session_id)
-                    VALUES (%s, %s, %s, %s)
-                """, (api_key, api_secret, total_investment, session_id))
+                    INSERT INTO user_config (api_key, api_secret, total_investment, session_id, api_name)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (api_key, api_secret, total_investment, session_id, api_name))
             self.conn.commit()
         except Exception as e:
             self.conn.rollback()
             raise Exception(f"保存配置失败: {str(e)}")
 
-    def get_latest_config(self, session_id):
-        """Get the latest user configuration for a specific session"""
+    def get_latest_config(self, session_id, api_name='default'):
+        """Get specific API configuration for a session"""
+        try:
+            with self.conn.cursor(cursor_factory=DictCursor) as cur:
+                cur.execute("""
+                    SELECT * FROM user_config 
+                    WHERE session_id = %s AND api_name = %s
+                """, (session_id, api_name))
+                return cur.fetchone()
+        except Exception as e:
+            raise Exception(f"获取配置失败: {str(e)}")
+            
+    def get_all_configs(self, session_id):
+        """Get all API configurations for a session"""
         try:
             with self.conn.cursor(cursor_factory=DictCursor) as cur:
                 cur.execute("""
                     SELECT * FROM user_config 
                     WHERE session_id = %s
-                    ORDER BY created_at DESC 
-                    LIMIT 1
+                    ORDER BY api_name
                 """, (session_id,))
-                return cur.fetchone()
+                return cur.fetchall()
         except Exception as e:
             raise Exception(f"获取配置失败: {str(e)}")
 
@@ -83,20 +107,35 @@ class Database:
             self.conn.rollback()
             raise Exception(f"清除配置失败: {str(e)}")
 
-    def save_balance_history(self, spot_value, futures_value, coin_futures_value, session_id):
+    def save_balance_history(self, wallet_values, session_id, wallet_type='spot', api_name='default'):
+        """
+        Save balance history with support for multiple wallet types
+        wallet_values: dict containing values for different wallet types
+        """
         try:
             # Ensure all values are properly converted to float
-            spot_value = to_float(spot_value)
-            futures_value = to_float(futures_value)
-            coin_futures_value = to_float(coin_futures_value)
-            total_value = spot_value + futures_value + coin_futures_value
+            spot_value = to_float(wallet_values.get('spot', 0))
+            futures_value = to_float(wallet_values.get('futures', 0))
+            coin_futures_value = to_float(wallet_values.get('coin_futures', 0))
+            cross_margin_value = to_float(wallet_values.get('cross_margin', 0))
+            isolated_margin_value = to_float(wallet_values.get('isolated_margin', 0))
+            
+            total_value = sum([
+                spot_value, futures_value, coin_futures_value,
+                cross_margin_value, isolated_margin_value
+            ])
             
             with self.conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO balance_history 
-                    (spot_value, futures_value, coin_futures_value, total_value, session_id, recorded_at)
-                    VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                """, (spot_value, futures_value, coin_futures_value, total_value, session_id))
+                    (spot_value, futures_value, coin_futures_value, cross_margin_value, 
+                     isolated_margin_value, total_value, wallet_type, session_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    spot_value, futures_value, coin_futures_value,
+                    cross_margin_value, isolated_margin_value,
+                    total_value, wallet_type, session_id
+                ))
             self.conn.commit()
         except Exception as e:
             print(f"Error saving balance history: {str(e)}")
