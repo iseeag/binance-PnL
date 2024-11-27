@@ -17,8 +17,23 @@ class BinanceService:
 
     def get_futures_balance(self):
         """获取U本位合约账户余额"""
-        futures_account = self.client.futures_account_balance()
-        return pd.DataFrame(futures_account)
+        # Get account balance
+        futures_account_balance = self.client.futures_account_balance()
+        balance_df = pd.DataFrame(futures_account_balance)
+        
+        # Get futures account info including positions
+        futures_account = self.client.futures_account()
+        positions = futures_account['positions']
+        
+        # Calculate total unrealized profit
+        total_unrealized_profit = sum(float(position['unrealizedProfit']) for position in positions)
+        
+        # Add unrealized profit to the balance dataframe
+        if not balance_df.empty and 'balance' in balance_df.columns:
+            balance_df.loc[balance_df['asset'] == 'USDT', 'balance'] = \
+                float(balance_df.loc[balance_df['asset'] == 'USDT', 'balance'].iloc[0]) + total_unrealized_profit
+            
+        return balance_df
 
     def get_coin_futures_balance(self):
         """获取币本位合约账户余额"""
